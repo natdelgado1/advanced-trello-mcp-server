@@ -19,7 +19,7 @@ export function registerCardsTools(server: McpServer, credentials: TrelloCredent
 				.optional()
 				.describe(
 					'Due date in ISO 8601 format (e.g. 2025-03-12 or 2025-03-12T18:30:00.000Z). Per Trello API docs. Optional.'
-			),
+				),
 			start: z
 				.string()
 				.optional()
