@@ -7,6 +7,57 @@ import { TrelloCredentials, TrelloColorEnum, TrelloColorWithNullEnum } from '../
  * Based on https://developer.atlassian.com/cloud/trello/rest/api-group-labels/
  */
 export function registerLabelsTools(server: McpServer, credentials: TrelloCredentials) {
+	// GET /1/boards/{id}/labels - List labels for a board
+	server.tool(
+		'get-board-labels',
+		{
+			boardId: z.string().describe('ID of the board to get labels from'),
+			fields: z.string().optional().describe('Comma-separated list of fields (name, color, idBoard, etc.)'),
+		},
+		async ({ boardId, fields }) => {
+			try {
+				if (!credentials.apiKey || !credentials.apiToken) {
+					return {
+						content: [
+							{
+								type: 'text',
+								text: 'Trello API credentials are not configured',
+							},
+						],
+						isError: true,
+					};
+				}
+
+				const url = new URL(`https://api.trello.com/1/boards/${boardId}/labels`);
+				url.searchParams.append('key', credentials.apiKey);
+				url.searchParams.append('token', credentials.apiToken);
+				if (fields) url.searchParams.append('fields', fields);
+
+				const response = await fetch(url.toString());
+				const data = await response.json();
+
+				return {
+					content: [
+						{
+							type: 'text',
+							text: JSON.stringify(data),
+						},
+					],
+				};
+			} catch (error) {
+				return {
+					content: [
+						{
+							type: 'text',
+							text: `Error getting board labels: ${error}`,
+						},
+					],
+					isError: true,
+				};
+			}
+		}
+	);
+
 	// POST /labels - Create a single label
 	server.tool(
 		'create-label',
