@@ -3,6 +3,19 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { TrelloCredentials } from '../types/common.js';
 
 /**
+ * Trello stores dates in UTC. Midnight UTC (00:00) displays as previous day in
+ * negative-offset timezones (e.g. Paraguay UTC-4). For date-only (YYYY-MM-DD),
+ * use noon UTC so the date displays correctly in most timezones.
+ * @see https://community.developer.atlassian.com/t/what-timezone-are-dates-in-api-data/42649
+ */
+function normalizeDueDate(value: string): string {
+	if (/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+		return `${value}T12:00:00.000Z`;
+	}
+	return value;
+}
+
+/**
  * Register all Cards API tools
  * Based on https://developer.atlassian.com/cloud/trello/rest/api-group-cards/
  */
@@ -33,8 +46,8 @@ export function registerCardsTools(server: McpServer, credentials: TrelloCredent
 					idList: listId,
 					pos: 'bottom',
 				};
-				if (due) body.due = due;
-				if (start) body.start = start;
+				if (due) body.due = normalizeDueDate(due);
+				if (start) body.start = normalizeDueDate(start);
 
 				const response = await fetch(
 					`https://api.trello.com/1/cards?key=${credentials.apiKey}&token=${credentials.apiToken}`,
@@ -93,8 +106,8 @@ export function registerCardsTools(server: McpServer, credentials: TrelloCredent
 							idList: card.listId,
 							pos: 'bottom',
 						};
-						if (card.due) body.due = card.due;
-						if (card.start) body.start = card.start;
+						if (card.due) body.due = normalizeDueDate(card.due);
+						if (card.start) body.start = normalizeDueDate(card.start);
 
 						const response = await fetch(
 							`https://api.trello.com/1/cards?key=${credentials.apiKey}&token=${credentials.apiToken}`,
@@ -131,7 +144,7 @@ export function registerCardsTools(server: McpServer, credentials: TrelloCredent
 		}
 	);
 
-	// PUT /cards/{id} - Update a card (description, name, due, start, or any combination)
+	// PUT /cards/{id} - Update a card (description, name, due, start, dueComplete, or any combination)
 	server.tool(
 		'update-card',
 		{
@@ -146,8 +159,12 @@ export function registerCardsTools(server: McpServer, credentials: TrelloCredent
 				.union([z.string(), z.null()])
 				.optional()
 				.describe('Start date in ISO 8601, or null to clear. Optional.'),
+			dueComplete: z
+				.boolean()
+				.optional()
+				.describe('Mark the due date as complete (true) or incomplete (false). For "sello de cierre" when moving to DONE.'),
 		},
-		async ({ cardId, description, name, due, start }) => {
+		async ({ cardId, description, name, due, start, dueComplete }) => {
 			try {
 				if (!credentials.apiKey || !credentials.apiToken) {
 					return {
@@ -161,18 +178,19 @@ export function registerCardsTools(server: McpServer, credentials: TrelloCredent
 					};
 				}
 
-				const body: { desc?: string; name?: string; due?: string | null; start?: string | null } = {};
+				const body: { desc?: string; name?: string; due?: string | null; start?: string | null; dueComplete?: boolean } = {};
 				if (description !== undefined) body.desc = description;
 				if (name !== undefined) body.name = name;
-				if (due !== undefined) body.due = due;
-				if (start !== undefined) body.start = start;
+				if (due !== undefined) body.due = due === null ? null : normalizeDueDate(due);
+				if (start !== undefined) body.start = start === null ? null : normalizeDueDate(start);
+				if (dueComplete !== undefined) body.dueComplete = dueComplete;
 
 				if (Object.keys(body).length === 0) {
 					return {
 						content: [
 							{
 								type: 'text',
-								text: 'At least one of description, name, due, or start must be provided',
+								text: 'At least one of description, name, due, start, or dueComplete must be provided',
 							},
 						],
 						isError: true,
@@ -204,6 +222,59 @@ export function registerCardsTools(server: McpServer, credentials: TrelloCredent
 						{
 							type: 'text',
 							text: `Error updating card: ${error}`,
+						},
+					],
+					isError: true,
+				};
+			}
+		}
+	);
+
+	// PUT /cards/{id} - Mark card as complete (convenience wrapper for dueComplete: true)
+	server.tool(
+		'mark-card-complete',
+		{
+			cardId: z.string().describe('ID of the card to mark as complete'),
+		},
+		async ({ cardId }) => {
+			try {
+				if (!credentials.apiKey || !credentials.apiToken) {
+					return {
+						content: [
+							{
+								type: 'text',
+								text: 'Trello API credentials are not configured',
+							},
+						],
+						isError: true,
+					};
+				}
+
+				const response = await fetch(
+					`https://api.trello.com/1/cards/${cardId}?key=${credentials.apiKey}&token=${credentials.apiToken}`,
+					{
+						method: 'PUT',
+						headers: {
+							'Content-Type': 'application/json',
+						},
+						body: JSON.stringify({ dueComplete: true }),
+					}
+				);
+				const data = await response.json();
+				return {
+					content: [
+						{
+							type: 'text',
+							text: JSON.stringify(data),
+						},
+					],
+				};
+			} catch (error) {
+				return {
+					content: [
+						{
+							type: 'text',
+							text: `Error marking card complete: ${error}`,
 						},
 					],
 					isError: true,
